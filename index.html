@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Шахматы</title>
+    <link rel="stylesheet" href="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.css">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://unpkg.com/@chrisoakman/chessboardjs@1.0.0/dist/chessboard-1.0.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 15px;
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 24px;
+            color: var(--tg-theme-text-color, #000);
+        }
+        #status {
+            text-align: center;
+            font-size: 18px;
+            font-weight: bold;
+            margin: 15px 0;
+            padding: 10px;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-radius: 8px;
+        }
+        #board {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto 20px;
+        }
+        .board-b72b1 {
+            border: 2px solid #404040;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            border-radius: 4px;
+        }
+        .white-1e1d7 {
+            background-color: #f0d9b5;
+        }
+        .black-3c85d {
+            background-color: #b58863;
+        }
+        .controls {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            background: var(--tg-theme-button-color, #0088cc);
+            color: var(--tg-theme-button-text-color, #ffffff);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        #moveHistory {
+            margin-top: 20px;
+            padding: 15px;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        .move-item {
+            display: inline-block;
+            margin: 3px;
+            padding: 5px 10px;
+            background: var(--tg-theme-bg-color, #fff);
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .highlight-square {
+            box-shadow: inset 0 0 10px rgba(255, 255, 0, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <h1>♟️ Шахматы</h1>
+    <div id="status">Ход белых</div>
+    <div id="board"></div>
+    <div class="controls">
+        <button onclick="newGame()">🔄 Новая игра</button>
+        <button onclick="undoMove()">↶ Отменить</button>
+        <button onclick="board.flip()">🔃 Перевернуть</button>
+    </div>
+    <div id="moveHistory"></div>
+    
+    <script>
+        // Инициализация Telegram Web App
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+        tg.enableClosingConfirmation();
+        
+        // Игра
+        let game = new Chess();
+        let moveHistory = [];
+        
+        // Конфигурация доски
+        let board = Chessboard('board', {
+            draggable: true,
+            position: 'start',
+            onDragStart: onDragStart,
+            onDrop: onDrop,
+            onSnapEnd: onSnapEnd,
+            onMouseoutSquare: onMouseoutSquare,
+            onMouseoverSquare: onMouseoverSquare,
+            pieceTheme: 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png'
+        });
+        
+        // Обработчики
+        function onDragStart(source, piece, position, orientation) {
+            if (game.game_over()) return false;
+            if ((game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+                (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+                return false;
+            }
+        }
+        
+        function onDrop(source, target) {
+            removeHighlights();
+            
+            let move = game.move({
+                from: source,
+                to: target,
+                promotion: 'q'
+            });
+            
+            if (move === null) return 'snapback';
+            
+            moveHistory.push(move.san);
+            updateMoveHistory();
+            updateStatus();
+            
+            // Отправка в Telegram
+            tg.sendData(JSON.stringify({
+                type: 'move',
+                move: source + target,
+                san: move.san
+            }));
+        }
+        
+        function onSnapEnd() {
+            board.position(game.fen());
+        }
+        
+        function onMouseoverSquare(square, piece) {
+            let moves = game.moves({
+                square: square,
+                verbose: true
+            });
+            
+            if (moves.length === 0) return;
+            
+            highlightSquare(square);
+            
+            for (let i = 0; i < moves.length; i++) {
+                highlightSquare(moves[i].to);
+            }
+        }
+        
+        function onMouseoutSquare(square, piece) {
+            removeHighlights();
+        }
+        
+        function highlightSquare(square) {
+            let $square = $('#board .square-' + square);
+            let background = $square.hasClass('black-3c85d') ? '#696969' : '#a9a9a9';
+            $square.css('background', background);
+        }
+        
+        function removeHighlights() {
+            $('#board .square-55d63').css('background', '');
+        }
+        
+        function updateStatus() {
+            let status = '';
+            let moveColor = game.turn() === 'w' ? 'Белые' : 'Черные';
+            
+            if (game.in_checkmate()) {
+                status = '🏆 МАТ! ' + (moveColor === 'Белые' ? 'Черные' : 'Белые') + ' победили!';
+                tg.showAlert(status);
+            } else if (game.in_draw()) {
+                status = '🤝 Ничья!';
+                tg.showAlert(status);
+            } else if (game.in_stalemate()) {
+                status = '🤝 ПАТ!';
+                tg.showAlert(status);
+            } else {
+                status = 'Ход: ' + moveColor;
+                if (game.in_check()) {
+                    status += ' ⚠️ ШАХ!';
+                }
+            }
+            
+            document.getElementById('status').textContent = status;
+        }
+        
+        function updateMoveHistory() {
+            let html = '<strong>История ходов:</strong><br>';
+            moveHistory.forEach((move, index) => {
+                html += `<span class="move-item">${index + 1}. ${move}</span>`;
+            });
+            document.getElementById('moveHistory').innerHTML = html;
+            document.getElementById('moveHistory').scrollTop = document.getElementById('moveHistory').scrollHeight;
+        }
+        
+        function newGame() {
+            if (confirm('Начать новую игру?')) {
+                game.reset();
+                board.start();
+                moveHistory = [];
+                updateStatus();
+                updateMoveHistory();
+                
+                tg.sendData(JSON.stringify({ 
+                    type: 'new_game' 
+                }));
+            }
+        }
+        
+        function undoMove() {
+            let move = game.undo();
+            if (move) {
+                board.position(game.fen());
+                moveHistory.pop();
+                updateStatus();
+                updateMoveHistory();
+            }
+        }
+        
+        // Адаптация под тему
+        if (tg.colorScheme === 'dark') {
+            document.body.style.background = '#18222d';
+        }
+        
+        // Адаптивность
+        window.addEventListener('resize', () => {
+            board.resize();
+        });
+        
+        // Инициализация
+        updateStatus();
+    </script>
+</body>
+</html>
